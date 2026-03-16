@@ -1,3 +1,4 @@
+print("CARICATO QUESTO MAIN")
 from manutenzioni import router as manutenzioni_router
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -119,6 +120,14 @@ class CreaUtenteRequest(BaseModel):
     username: str
     password: str
     ruolo: str  # "admin" o "tecnico"
+from pydantic import BaseModel
+
+class CreaImpiantoRequest(BaseModel):
+    codice: str
+    cliente: str
+    indirizzo: str
+    citta: str
+    note: str | None = None
 
 @app.post("/utenti")
 def crea_utente(body: CreaUtenteRequest, x_admin_key: str = Header(default="")):
@@ -153,15 +162,29 @@ def crea_utente(body: CreaUtenteRequest, x_admin_key: str = Header(default="")):
 # ---------------- CHIAMATE ----------------
 
 @app.post("/chiamate")
-def crea_chiamata(ascensore: str = Query(...), descrizione: str = Query(...)):
+def crea_chiamata(
+    impianto_id: int =Query(...),
+    descrizione: str = Query(...),
+    priorita: str = Query("media")
+):
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute(
-        "INSERT INTO chiamate (ascensore, descrizione, stato, tecnico, data_apertura, data_chiusura) "
-        "VALUES (?, ?, ?, ?, datetime('now','localtime'), NULL)",
-        (ascensore.strip(), descrizione.strip(), "aperta", None)
+    """
+    INSERT INTO chiamate
+    (impianto_id, descrizione, stato, tecnico,
+     data_apertura, data_chiusura, priorita)
+    VALUES (?, ?, ?, ?, datetime('now','localtime'), NULL, ?)
+    """,
+    (
+        dati.impianto_id,
+        dati.descrizione.strip(),
+        "aperta",
+        None,
+        dati.priorita
     )
+)
 
     conn.commit()
     conn.close()
@@ -188,6 +211,7 @@ def lista_chiamate():
       c.impianto_id,
       c.note_tecnico,
       c.esito,
+      c.priorita,
       i.codice,
       i.cliente,
       i.indirizzo,
@@ -195,7 +219,7 @@ def lista_chiamate():
       i.note
     FROM chiamate c
     LEFT JOIN impianti i ON i.id = c.impianto_id
-    ORDER BY c.id DESC
+    ORDER BY c.data_apertura DESC
     """)
 
     rows = cur.fetchall()
@@ -205,7 +229,6 @@ def lista_chiamate():
     for row in rows:
         chiamate.append({
             "id": row["id"],
-            "ascensore": row["ascensore"],
             "descrizione": row["descrizione"],
             "stato": row["stato"],
             "tecnico": row["tecnico"],
@@ -214,6 +237,7 @@ def lista_chiamate():
             "impianto_id": row["impianto_id"],
             "note_tecnico": row["note_tecnico"],
             "esito": row["esito"],
+            "priorita": row["priorita"],
             "impianto": {
                 "codice": row["codice"],
                 "cliente": row["cliente"],
@@ -324,6 +348,74 @@ def prendi_chiamata(chiamata_id: int, tecnico: str = Query(...)):
     conn.close()
 
     return {"ok": True}
+# ---------------- RILASCIA CHIAMATA ----------------
+
+@app.put("/chiamate/{chiamata_id}/rilascia")
+def rilascia_chiamata(chiamata_id: int, tecnico: str = Query(...)):
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Verifica esistenza chiamata
+    cur.execute(
+        "SELECT tecnico, stato FROM chiamate WHERE id = ?",
+        (chiamata_id,)
+    )
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        return {"ok": False, "error": "Chiamata non trovata"}
+
+    # Solo il tecnico assegnato può rilasciare
+    if row[0] != tecnico:
+        conn.close()
+        return {"ok": False, "error": "Non sei il tecnico assegnato"}
+
+    # Solo se in lavorazione
+    if row[1] != "in lavorazione":
+        conn.close()
+        return {"ok": False, "error": "La chiamata non è in lavorazione"}
+
+    # Ripristina stato
+    cur.execute(
+        """
+        UPDATE chiamate
+        SET stato = 'aperta',
+            tecnico = NULL
+        WHERE id = ?
+        """,
+        (chiamata_id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {"ok": True}
+
+@app.post("/impianti")
+def crea_impianto(body: CreaImpiantoRequest):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO impianti (codice, cliente, indirizzo, citta, note, attivo)
+        VALUES (?, ?, ?, ?, ?, 1)
+        """,
+        (
+            body.codice.strip(),
+            body.cliente.strip(),
+            body.indirizzo.strip(),
+            body.citta.strip(),
+            body.note.strip() if body.note else None,
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {"ok": True, "messaggio": "Impianto creato con successo"}
 
 @app.put("/manutenzioni/{manutenzione_id}/esegui")
 def esegui_manutenzione(manutenzione_id: int):
@@ -487,30 +579,42 @@ def chiudi_chiamata(
     return {"ok": True}
 from pydantic import BaseModel
 
-class CreaChiamataRequest(BaseModel):
+class ChiamataCreate(BaseModel):
     impianto_id: int
     descrizione: str
+    priorita: str = "media"
 
 
 @app.post("/chiamate-da-impianto")
-def crea_chiamata_da_impianto(body: CreaChiamataRequest):
+def crea_chiamata(dati: ChiamataCreate):
+    print("PRIORITA ARRIVATA AL BACKEND:", dati.priorita)
+    
     conn = get_connection()
     cur = conn.cursor()
 
     # Verifica impianto esiste ed è attivo
     cur.execute(
         "SELECT id FROM impianti WHERE id = ? AND attivo = 1",
-        (body.impianto_id,)
+        (dati.impianto_id,)
     )
     if not cur.fetchone():
         conn.close()
         return {"ok": False, "error": "Impianto non trovato o non attivo"}
 
     cur.execute(
-        "INSERT INTO chiamate (impianto_id, descrizione, stato, tecnico, data_apertura, data_chiusura) "
-        "VALUES (?, ?, ?, ?, datetime('now','localtime'), NULL)",
-        (body.impianto_id, body.descrizione.strip(), "aperta", None)
+    """
+    INSERT INTO chiamate
+    (impianto_id, descrizione, stato, tecnico, data_apertura, data_chiusura, priorita)
+    VALUES (?, ?, ?, ?, datetime('now','localtime'), NULL, ?)
+    """,
+    (
+        dati.impianto_id,
+        dati.descrizione.strip(),
+        "aperta",
+        None,
+        dati.priorita
     )
+)
 
     conn.commit()
     conn.close()

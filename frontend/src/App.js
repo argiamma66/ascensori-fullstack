@@ -16,6 +16,7 @@ function App() {
   const [impianti, setImpianti] = useState([]);
   const [impiantoId, setImpiantoId] = useState("");
   const [descrGuasto, setDescrGuasto] = useState("");
+  const [priorita, setPriorita] = useState("media");
   const [nuovoImpiantoId, setNuovoImpiantoId] = useState(null);
   const [mostraStorico, setMostraStorico] = useState(false);
 
@@ -52,33 +53,39 @@ function App() {
 
 
   function login() {
-    fetch("/login", {
+  console.log("LOGIN CLICCATO");
 
+  fetch("http://localhost:8000/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: username.trim().toLowerCase(),
+      password: password.trim(),
+    }),
+  })
+    .then((res) => res.json())
+    .then((data) => {
+      console.log("RISPOSTA LOGIN:", data);   // 👈 aggiungi questa riga
 
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: username.trim().toLowerCase(), password: password.trim() }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.ok) {
-          setUser(data.user);
-          localStorage.setItem("user", JSON.stringify(data.user));
-          setLoginError(false);
-        } else {
-          setUser(null);
-          localStorage.removeItem("user");
-          setLoginError(true);
-        }
-      })
-      .catch(() => {
+      if (data.ok) {
+        setUser(data.user);
+        localStorage.setItem("user", JSON.stringify(data.user));
+        setLoginError(false);
+      } else {
+        setUser(null);
+        localStorage.removeItem("user");
         setLoginError(true);
-      });
-  }
+      }
+    })
+    .catch((err) => {
+      console.log("ERRORE FETCH:", err);     // 👈 anche questa
+      setLoginError(true);
+    });
+}
 function creaUtente() {
   setUserMsg("");
 
-  fetch("/utenti", {
+  fetch("http://localhost:8000/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -130,13 +137,14 @@ function creaUtente() {
     setMsgChiamata("Inserisci una descrizione del guasto");
     return;
   }
-
+  console.log("PRIORITA SELEZIONATA:", priorita);
   fetch("http://127.0.0.1:8000/chiamate-da-impianto", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       impianto_id: Number(impiantoId),
       descrizione: descrGuasto.trim(),
+      priorita: priorita,
     }),
   })
     .then((res) => res.json())
@@ -187,6 +195,7 @@ function creaUtente() {
     body: JSON.stringify({
       impianto_id: nuovoImpiantoId,
       descrizione: nuovaDescrizione.trim(),
+      priorita: priorita,
     }),
   })
     .then((res) => res.json())
@@ -235,7 +244,22 @@ function creaUtente() {
       })
       .catch(() => alert("Errore di rete"));
   }
-
+  function rilasciaChiamata(id) {
+  fetch(
+    `http://localhost:8000/chiamate/${id}/rilascia?tecnico=${user.username}`,
+    {
+      method: "PUT",
+    }
+  )
+    .then((res) => res.json())
+    .then((data) => {
+      if (data.ok) {
+        caricaChiamate();
+      } else {
+        alert(data.error);
+      }
+    });
+  }
   // ✅ Il backend vuole: /chiudi?tecnico=<username>
   function chiudiChiamata(id) {
     if (!user) return;
@@ -403,6 +427,15 @@ const chiamateVisibili = chiamate
               onChange={(e) => setDescrGuasto(e.target.value)}
               style={{ padding: 8, minWidth: 320, flex: "1 1 320px" }}
             />
+            <select
+  value={priorita}
+  onChange={(e) => setPriorita(e.target.value)}
+>
+  <option value="impianto_fermo">Impianto fermo</option>
+  <option value="urgente">Urgente</option>
+  <option value="media">Media</option>
+  <option value="bassa">Bassa</option>
+</select>
 
             <button
               onClick={creaChiamataDaImpianto}
@@ -682,7 +715,23 @@ const chiamateVisibili = chiamate
                   }}
                 >
                   <td>{c.id}</td>
-                  <td>{c.ascensore}</td>
+                  <td>
+  <div>
+    <strong>
+      {c.impianto?.codice} – {c.impianto?.cliente}
+    </strong>
+  </div>
+
+  <div style={{ fontSize: "13px" }}>
+    {c.impianto?.indirizzo}, {c.impianto?.citta}
+  </div>
+
+  {c.impianto?.note && (
+    <div style={{ fontSize: "12px", color: "#666" }}>
+      {c.impianto?.note}
+    </div>
+  )}
+</td>
                   <td>{c.descrizione}</td>
 
                   <td>
@@ -702,6 +751,9 @@ const chiamateVisibili = chiamate
                     >
                       {c.stato}
                     </span>
+                    <div style={{ fontSize: "12px", marginTop: "4px" }}>
+                      {c.priorita}
+                    </div>
                   </td>
 
                   <td>{c.tecnico || "-"}</td>
@@ -710,9 +762,30 @@ const chiamateVisibili = chiamate
 
                   <td style={{ display: "flex", gap: "8px" }}>
                     {user.ruolo === "tecnico" && c.stato === "aperta" && !c.tecnico && (
-                      <button onClick={() => prendiChiamata(c.id)}>Prendi chiamata</button>
+                      <button
+                        onClick={() => {
+                          if (window.confirm("Confermi di prendere in carico questa chiamata?")) {
+                            prendiChiamata(c.id);
+                          }
+                        }}
+                      >
+                        Prendi
+                      </button>
                     )}
-
+                    {user.ruolo === "tecnico" &&
+                      c.stato === "in lavorazione" &&
+                      c.tecnico === user.username && (
+                        <button
+                          style={{ backgroundColor: "#f0ad4e" }}
+                          onClick={() => {
+                            if (window.confirm("Confermi di rilasciare questa chiamata?")) {
+                              rilasciaChiamata(c.id);
+                            }
+                          }}
+                        >
+                          Rilascia
+                        </button>
+                   )}
                     {user.ruolo === "tecnico" &&
                       c.stato !== "chiusa" &&
                       c.tecnico === user.username && (
