@@ -3,6 +3,9 @@ import React, { useEffect, useState } from "react";
 function App() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [noteTecnico, setNoteTecnico] = useState("");
+  const [esito, setEsito] = useState("");
+  const [materiali, setMateriali] = useState("");
   const [user, setUser] = useState(null);
   const [loginError, setLoginError] = useState(false);
   
@@ -32,7 +35,12 @@ function App() {
   const [msgChiamata, setMsgChiamata] = useState("");
   const [mostraChiuse, setMostraChiuse] = useState(false);
   const [debugImpiantiCalls, setDebugImpiantiCalls] = useState(0);
-
+  const [mostraNuovoImpianto, setMostraNuovoImpianto] = useState(false);
+  const [nuovoCodice, setNuovoCodice] = useState("");
+  const [nuovoCliente, setNuovoCliente] = useState("");
+  const [nuovoIndirizzo, setNuovoIndirizzo] = useState("");
+  const [nuovaCitta, setNuovaCitta] = useState("");
+  const [nuoveNote, setNuoveNote] = useState("");
   
   
   // ✅ Ripristina utente da localStorage al primo caricamento (F5 non ti “sloga”)
@@ -46,8 +54,9 @@ function App() {
   // poi ogni 10 secondi (solo chiamate)
   const timer = setInterval(() => {
     caricaChiamate();
-  }, 10000);
 
+  }, 10000);
+  
   return () => clearInterval(timer);
 }, [user]);
 
@@ -81,7 +90,38 @@ function App() {
       console.log("ERRORE FETCH:", err);     // 👈 anche questa
       setLoginError(true);
     });
+    
 }
+function salvaNuovoImpianto() {
+      fetch("http://127.0.0.1:8000/impianti", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codice: nuovoCodice.trim(),
+          cliente: nuovoCliente.trim(),
+          indirizzo: nuovoIndirizzo.trim(),
+          citta: nuovaCitta.trim(),
+          note: nuoveNote.trim(),
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.ok) {
+            setMostraNuovoImpianto(false);
+            caricaImpianti();
+            setNuovoCodice("");
+            setNuovoCliente("");
+            setNuovoIndirizzo("");
+            setNuovaCitta("");
+            setNuoveNote("");
+          } else {
+            alert("Errore creazione impianto");
+          }
+        })
+        .catch(() => {
+          alert("Errore di rete");
+        });
+    }
 function creaUtente() {
   setUserMsg("");
 
@@ -216,7 +256,7 @@ function creaUtente() {
       alert("Errore di rete");
     });
 }
-
+          
 
 
  
@@ -265,10 +305,10 @@ function creaUtente() {
     if (!user) return;
     if (!window.confirm("Confermi di chiudere questa chiamata?")) return;
 
-    fetch(
-  `/chiamate/${id}/chiudi?tecnico=${encodeURIComponent(user.username)}`,
-  { method: "PUT" }
-)
+  fetch(
+    `/chiamate/${id}/chiudi?tecnico=${encodeURIComponent(user.username)}&note_tecnico=${encodeURIComponent(noteTecnico)}&esito=${encodeURIComponent(esito)}&materiali=${encodeURIComponent(materiali)}`,
+    { method: "PUT" }
+  )
       .then((res) => res.json())
       .then((data) => {
         if (!data.ok) {
@@ -732,7 +772,17 @@ const chiamateVisibili = chiamate
     </div>
   )}
 </td>
-                  <td>{c.descrizione}</td>
+                <td>
+                  <div>{c.descrizione}</div>
+                  
+                  {c.stato === "chiusa" && (
+                    <div style={{ fontSize: "12px", marginTop: "6px", color: "#555" }}>
+                      <div><strong>Intervento:</strong> {c.note_tecnico}</div>
+                      <div><strong>Materiali:</strong> {c.materiali}</div>
+                      <div><strong>Esito:</strong> {c.esito}</div>
+                    </div>
+                  )}
+                </td>
 
                   <td>
                     <span
@@ -789,8 +839,45 @@ const chiamateVisibili = chiamate
                     {user.ruolo === "tecnico" &&
                       c.stato !== "chiusa" &&
                       c.tecnico === user.username && (
-                        <button onClick={() => chiudiChiamata(c.id)}>Chiudi</button>
+                    <div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        <textarea
+                          placeholder="Descrizione intervento"
+                          value={noteTecnico}
+                          onChange={(e) => setNoteTecnico(e.target.value)}
+                        />
+
+                        <textarea
+                          placeholder="Materiali utilizzati"
+                          value={materiali}
+                          onChange={(e) => setMateriali(e.target.value)}
+                        />
+
+                        <select value={esito} onChange={(e) => setEsito(e.target.value)}>
+                          <option value="">Seleziona esito</option>
+                          <option value="risolto">Risolto</option>
+                          <option value="parziale">Parziale</option>
+                          <option value="da_ricontattare">Da ricontattare</option>
+                        </select>
+                      </div>
+                        <button onClick={() => chiudiChiamata(c.id)}>
+                          Chiudi
+                        </button>
+                      </div>
                       )}
+                      {c.stato === "chiusa" && (
+                        <button
+                          style={{ backgroundColor: "#5bc0de" }}
+                          onClick={() =>
+                            window.open(
+                              `http://localhost:8000/chiamate/${c.id}/bolla-pdf`,
+                              "_blank"
+                            )
+                         }
+                       >
+                         Bolla PDF
+                       </button>
+                     )}
                       {c.impianto_id && (
                         <button
                           onClick={() => caricaStoricoImpianto(c.impianto_id)}
@@ -820,6 +907,40 @@ const chiamateVisibili = chiamate
               ))}
           </tbody>
         </table>
+        <hr style={{ margin: "40px 0" }} />
+
+<h2>Archivio Impianti</h2>
+<button
+  onClick={() => setMostraNuovoImpianto(true)}
+  style={{ marginBottom: "10px" }}
+>
+  + Nuovo Impianto
+</button>
+
+<table border="1" cellPadding="6" style={{ width: "100%" }}>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Codice</th>
+      <th>Cliente</th>
+      <th>Indirizzo</th>
+      <th>Città</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    {impianti.map((imp) => (
+      <tr key={imp.id}>
+        <td>{imp.id}</td>
+        <td>{imp.codice}</td>
+        <td>{imp.cliente}</td>
+        <td>{imp.indirizzo}</td>
+        <td>{imp.citta}</td>
+        <td>{imp.note || "-"}</td>
+      </tr>
+    ))}
+  </tbody>
+</table>
         <div
   style={{
     marginTop: 20,
@@ -893,7 +1014,74 @@ const chiamateVisibili = chiamate
         </p>
 
         {/* 👇 QUI INCOLLI IL POPUP MODALE 👇 */}
+        {mostraNuovoImpianto && (
+  <div
+    style={{
+      position: "fixed",
+      top: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      backgroundColor: "rgba(0,0,0,0.4)",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      zIndex: 1000
+    }}
+  >
+    <div
+      style={{
+        backgroundColor: "white",
+        padding: "20px",
+        borderRadius: "8px",
+        width: "400px"
+      }}
+    >
+      <h3>Nuovo Impianto</h3>
 
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+  <input
+    placeholder="Codice impianto"
+    value={nuovoCodice}
+    onChange={(e) => setNuovoCodice(e.target.value)}
+  />
+
+  <input
+    placeholder="Cliente"
+    value={nuovoCliente}
+    onChange={(e) => setNuovoCliente(e.target.value)}
+  />
+
+  <input
+    placeholder="Indirizzo"
+    value={nuovoIndirizzo}
+    onChange={(e) => setNuovoIndirizzo(e.target.value)}
+  />
+
+  <input
+    placeholder="Città"
+    value={nuovaCitta}
+    onChange={(e) => setNuovaCitta(e.target.value)}
+  />
+
+  <textarea
+    placeholder="Note"
+    value={nuoveNote}
+    onChange={(e) => setNuoveNote(e.target.value)}
+  />
+</div>
+<button
+  onClick={salvaNuovoImpianto}
+  style={{ marginTop: "10px" }}
+>
+  Salva Impianto
+</button>
+<button onClick={() => setMostraNuovoImpianto(false)}>
+  Chiudi
+</button>
+    </div>
+  </div>
+)}
         {mostraStorico && (
   <div
     onClick={() => setMostraStorico(false)}

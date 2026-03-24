@@ -10,6 +10,13 @@ ESITI_VALIDI = [
     "da_ritornare",
     "impianto_fermo"
 ]
+import sqlite3
+conn = sqlite3.connect("manutenzione.db")
+cur = conn.cursor()
+
+
+conn.commit()
+conn.close()
 from datetime import date
 from dateutil.relativedelta import relativedelta
 def get_db_connection():
@@ -210,6 +217,7 @@ def lista_chiamate():
       c.data_chiusura,
       c.impianto_id,
       c.note_tecnico,
+      c.materiali,
       c.esito,
       c.priorita,
       i.codice,
@@ -236,6 +244,7 @@ def lista_chiamate():
             "data_chiusura": row["data_chiusura"],
             "impianto_id": row["impianto_id"],
             "note_tecnico": row["note_tecnico"],
+            "materiali": row["materiali"],
             "esito": row["esito"],
             "priorita": row["priorita"],
             "impianto": {
@@ -537,8 +546,9 @@ def assegna_tecnico(chiamata_id: int, body: AssegnaTecnicoRequest):
 def chiudi_chiamata(
     chiamata_id: int,
     tecnico: str = Query(...),
-    note: str = Query(...),
-    esito: str = Query(...)
+    note_tecnico: str = Query(...),
+    esito: str = Query(...),
+    materiali: str = Query("")
 ):
 
     conn = get_db_connection()
@@ -557,6 +567,9 @@ def chiudi_chiamata(
     if row["tecnico"] != tecnico:
         conn.close()
         return {"ok": False, "error": "Non sei il tecnico assegnato"}
+    if not note_tecnico or note_tecnico.strip() == "":
+        conn.close()
+        return {"ok": False, "error": "Descrizione intervento obbligatoria"}
     # Validazione esito
     if esito not in ESITI_VALIDI:
         conn.close()
@@ -564,14 +577,18 @@ def chiudi_chiamata(
             "ok": False,
             "error": f"Esito non valido. Valori ammessi: {ESITI_VALIDI}"
         }
-    cur.execute("""
+    cur.execute(
+        """
         UPDATE chiamate
         SET stato = 'chiusa',
             data_chiusura = datetime('now','localtime'),
             note_tecnico = ?,
-            esito = ?
+            esito = ?,
+            materiali = ?
         WHERE id = ?
-    """, (note.strip(), esito.strip(), chiamata_id))
+        """,
+    (note_tecnico.strip(), esito, materiali.strip(), chiamata_id)
+    )
 
     conn.commit()
     conn.close()
@@ -625,13 +642,73 @@ def crea_chiamata(dati: ChiamataCreate):
 # -----------------------------
 from fastapi.responses import FileResponse
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib import pagesizes
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 from reportlab.lib.units import cm
 import os
+@app.get("/chiamate/{chiamata_id}/bolla-pdf")
+def genera_bolla_pdf(chiamata_id: int):
+
+    conn = get_connection()
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT c.*, i.cliente, i.indirizzo, i.citta
+        FROM chiamate c
+        LEFT JOIN impianti i ON i.id = c.impianto_id
+        WHERE c.id = ?
+    """, (chiamata_id,))
+
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return {"ok": False, "error": "Chiamata non trovata"}
+
+    # Nome file
+    filename = f"bolla_chiamata_{chiamata_id}.pdf"
+    filepath = os.path.join("bolle", filename)
+
+    os.makedirs("bolle", exist_ok=True)
+
+    doc = SimpleDocTemplate(filepath, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+
+    elements.append(Paragraph("<b>BOLLA DI LAVORAZIONE</b>", styles["Title"]))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph(f"Cliente: {row['cliente']}", styles["Normal"]))
+    elements.append(Paragraph(f"Indirizzo: {row['indirizzo']} - {row['citta']}", styles["Normal"]))
+    elements.append(Paragraph(f"Tecnico: {row['tecnico']}", styles["Normal"]))
+    elements.append(Paragraph(f"Data intervento: {row['data_chiusura']}", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("<b>Descrizione intervento:</b>", styles["Normal"]))
+    elements.append(Paragraph(row["note_tecnico"] or "-", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph("<b>Materiali utilizzati:</b>", styles["Normal"]))
+    elements.append(Paragraph(row["materiali"] or "-", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+
+    elements.append(Paragraph(f"<b>Esito:</b> {row['esito']}", styles["Normal"]))
+    elements.append(Spacer(1, 24))
+
+    elements.append(Paragraph("Firma Cliente: ___________________________", styles["Normal"]))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph("Firma Tecnico: ___________________________", styles["Normal"]))
+
+    doc.build(elements)
+
+    return FileResponse(filepath, media_type="application/pdf", filename=filename)
 
 @app.get("/clienti/{cliente}/report-pdf")
 def report_pdf_cliente(cliente: str):
