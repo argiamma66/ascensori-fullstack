@@ -22,7 +22,8 @@ function App() {
   const [priorita, setPriorita] = useState("media");
   const [nuovoImpiantoId, setNuovoImpiantoId] = useState(null);
   const [mostraStorico, setMostraStorico] = useState(false);
-
+  const [impiantoScheda, setImpiantoScheda] = useState(null);
+  const [mostraSchedaTecnica, setMostraSchedaTecnica] = useState(false);
 
   
 
@@ -926,6 +927,7 @@ const chiamateVisibili = chiamate
       <th>Indirizzo</th>
       <th>Città</th>
       <th>Note</th>
+      <th>Scheda</th>
     </tr>
   </thead>
   <tbody>
@@ -937,6 +939,16 @@ const chiamateVisibili = chiamate
         <td>{imp.indirizzo}</td>
         <td>{imp.citta}</td>
         <td>{imp.note || "-"}</td>
+        <td>
+          <button
+            onClick={() => {
+              setImpiantoScheda(imp);
+              setMostraSchedaTecnica(true);
+            }}
+          >
+            Apri
+          </button>
+        </td>
       </tr>
     ))}
   </tbody>
@@ -1069,6 +1081,7 @@ const chiamateVisibili = chiamate
     value={nuoveNote}
     onChange={(e) => setNuoveNote(e.target.value)}
   />
+  
 </div>
 <button
   onClick={salvaNuovoImpianto}
@@ -1079,6 +1092,95 @@ const chiamateVisibili = chiamate
 <button onClick={() => setMostraNuovoImpianto(false)}>
   Chiudi
 </button>
+    </div>
+  </div>
+)}
+{mostraSchedaTecnica && impiantoScheda && (
+  <div
+    style={{
+      position: "fixed",
+      top: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      backgroundColor: "rgba(0,0,0,0.4)",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      zIndex: 1000
+    }}
+  >
+    <div
+      style={{
+        backgroundColor: "white",
+        padding: "20px",
+        borderRadius: "8px",
+        width: "500px",
+        maxHeight: "80%",
+        overflowY: "auto"
+      }}
+    >
+      <h3>Scheda Tecnica Impianto</h3>
+
+      <p><strong>Codice:</strong> {impiantoScheda.codice}</p>
+      <p><strong>Cliente:</strong> {impiantoScheda.cliente}</p>
+      <p><strong>Indirizzo:</strong> {impiantoScheda.indirizzo}</p>
+      <p><strong>Città:</strong> {impiantoScheda.citta}</p>
+
+      <hr />
+
+      {user?.ruolo === "admin" ? (
+  <textarea
+    style={{ width: "100%", minHeight: "120px" }}
+    value={impiantoScheda.scheda_tecnica || ""}
+    onChange={(e) =>
+      setImpiantoScheda({
+        ...impiantoScheda,
+        scheda_tecnica: e.target.value,
+      })
+    }
+  />
+
+) : (
+  <p>
+    {impiantoScheda.scheda_tecnica
+      ? impiantoScheda.scheda_tecnica
+      : "Nessuna scheda tecnica disponibile."}
+  </p>
+)}
+{user?.ruolo === "admin" && (
+  <button
+  style={{ marginTop: "10px" }}
+  onClick={() => {
+    fetch(
+      `http://127.0.0.1:8000/impianti/${impiantoScheda.id}/scheda?scheda_tecnica=${encodeURIComponent(impiantoScheda.scheda_tecnica || "")}`,
+      {
+        method: "PUT",
+      }
+    )
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok) {
+          alert("Scheda tecnica salvata");
+          caricaImpianti();
+        } else {
+          alert("Errore salvataggio");
+        }
+      })
+      .catch(() => alert("Errore di rete"));
+  }}
+>
+  Salva Scheda Tecnica
+</button>
+)}
+      <button
+        onClick={() => {
+          setMostraSchedaTecnica(false);
+          setImpiantoScheda(null);
+        }}
+      >
+        Chiudi
+      </button>
     </div>
   </div>
 )}

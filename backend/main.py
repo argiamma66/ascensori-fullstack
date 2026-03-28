@@ -304,7 +304,7 @@ def lista_impianti():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, codice, cliente, indirizzo, citta, note
+        SELECT id, codice, cliente, indirizzo, citta, note, scheda_tecnica
         FROM impianti
         WHERE attivo = 1
         ORDER BY cliente
@@ -321,6 +321,7 @@ def lista_impianti():
             "indirizzo": r[3],
             "citta": r[4],
             "note": r[5],
+            "scheda_tecnica": r[6],
         }
         for r in rows
     ]
@@ -780,3 +781,17 @@ def report_pdf_cliente(cliente: str):
     doc.build(elements)
 
     return FileResponse(file_path, filename=file_path, media_type='application/pdf')
+@app.put("/impianti/{impianto_id}/scheda")
+def aggiorna_scheda_tecnica(impianto_id: int, scheda_tecnica: str):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "UPDATE impianti SET scheda_tecnica = ? WHERE id = ?",
+        (scheda_tecnica, impianto_id)
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {"ok": True}
